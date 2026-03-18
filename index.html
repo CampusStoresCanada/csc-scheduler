@@ -61,7 +61,7 @@ function Badge({ children, color = COLORS.accent }) {
   );
 }
 
-function TimeSlotGrid({ slots, lunchAfterSlot, startHour, startMin, meetingDuration, transitionDuration }) {
+function TimeSlotGrid({ slots, lunchAfterSlot, lunchDuration, morningBreakAfterSlot, morningBreakDuration, afternoonBreakAfterSlot, afternoonBreakDuration, startHour, startMin, meetingDuration, transitionDuration }) {
   const formatTime = (totalMin) => {
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
@@ -72,17 +72,41 @@ function TimeSlotGrid({ slots, lunchAfterSlot, startHour, startMin, meetingDurat
   let currentMin = startHour * 60 + startMin;
   const rendered = [];
   for (let i = 0; i < slots; i++) {
+    if (morningBreakDuration > 0 && i === morningBreakAfterSlot) {
+      rendered.push(
+        <div key={`mbreak-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: COLORS.warning + "33", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>☕</div>
+          <div style={{ flex: 1, background: COLORS.warning + "10", border: `1px dashed ${COLORS.warning}44`, borderRadius: 6, padding: "6px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: COLORS.warning, fontWeight: 600 }}>MORNING BREAK</span>
+            <span style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{formatTime(currentMin)} – {formatTime(currentMin + morningBreakDuration)}</span>
+          </div>
+        </div>
+      );
+      currentMin += morningBreakDuration;
+    }
     if (i === lunchAfterSlot) {
       rendered.push(
         <div key={`lunch-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
           <div style={{ width: 28, height: 28, borderRadius: "50%", background: COLORS.lunch + "33", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🍽</div>
           <div style={{ flex: 1, background: COLORS.lunch + "15", border: `1px dashed ${COLORS.lunch}44`, borderRadius: 6, padding: "6px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 12, color: COLORS.lunch, fontWeight: 600 }}>LUNCH</span>
-            <span style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{formatTime(currentMin)} – {formatTime(currentMin + 30)}</span>
+            <span style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{formatTime(currentMin)} – {formatTime(currentMin + lunchDuration)}</span>
           </div>
         </div>
       );
-      currentMin += 30;
+      currentMin += lunchDuration;
+    }
+    if (afternoonBreakDuration > 0 && i === afternoonBreakAfterSlot) {
+      rendered.push(
+        <div key={`abreak-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: COLORS.warning + "33", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🧃</div>
+          <div style={{ flex: 1, background: COLORS.warning + "10", border: `1px dashed ${COLORS.warning}44`, borderRadius: 6, padding: "6px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: COLORS.warning, fontWeight: 600 }}>AFTERNOON BREAK</span>
+            <span style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{formatTime(currentMin)} – {formatTime(currentMin + afternoonBreakDuration)}</span>
+          </div>
+        </div>
+      );
+      currentMin += afternoonBreakDuration;
     }
     const slotStart = currentMin;
     const slotEnd = currentMin + meetingDuration;
@@ -115,10 +139,12 @@ function App() {
   const [meetingDays, setMeetingDays] = useState(2);
   const [halfDay, setHalfDay] = useState(true);
   const [targetCoverage, setTargetCoverage] = useState(80);
+  const [morningBreak, setMorningBreak] = useState(0);
+  const [afternoonBreak, setAfternoonBreak] = useState(0);
 
   const calc = useMemo(() => {
     const totalMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
-    const meetableMinutes = totalMinutes - lunchDuration;
+    const meetableMinutes = totalMinutes - lunchDuration - morningBreak - afternoonBreak;
     const slotDuration = meetingDuration + transitionTime;
     const properSlots = Math.floor((meetableMinutes + transitionTime) / slotDuration);
     const halfDayMinutes = (12 * 60) - (startHour * 60 + startMin);
@@ -132,16 +158,39 @@ function App() {
     const feasible = totalSlots >= vendorsToVisit;
     const noonMin = 12 * 60;
     const dayStartMin = startHour * 60 + startMin;
+    // Find best lunch slot (closest to noon)
     let bestLunchSlot = 1;
     let bestDelta = Infinity;
     for (let s = 1; s < properSlots; s++) {
-      const lunchStartIfAfterSlot = dayStartMin + s * meetingDuration + (s - 1) * transitionTime + transitionTime;
+      const lunchStartIfAfterSlot = dayStartMin + s * slotDuration;
       const delta = Math.abs(lunchStartIfAfterSlot - noonMin);
       if (delta < bestDelta) { bestDelta = delta; bestLunchSlot = s; }
     }
     const lunchAfterSlot = bestLunchSlot;
+    // Find morning break slot (target 10:30 AM), must be before lunch
+    let morningBreakAfterSlot = -1;
+    if (morningBreak > 0 && lunchAfterSlot > 1) {
+      let bDelta = Infinity;
+      const morningTarget = 10 * 60 + 30;
+      for (let s = 1; s < lunchAfterSlot; s++) {
+        const breakStart = dayStartMin + s * slotDuration;
+        const d = Math.abs(breakStart - morningTarget);
+        if (d < bDelta) { bDelta = d; morningBreakAfterSlot = s; }
+      }
+    }
+    // Find afternoon break slot (target 3:00 PM), must be after lunch
+    let afternoonBreakAfterSlot = -1;
+    if (afternoonBreak > 0 && properSlots > lunchAfterSlot + 1) {
+      let bDelta = Infinity;
+      const afternoonTarget = 15 * 60;
+      for (let s = lunchAfterSlot + 1; s < properSlots; s++) {
+        const breakStart = dayStartMin + s * slotDuration + lunchDuration + morningBreak;
+        const d = Math.abs(breakStart - afternoonTarget);
+        if (d < bDelta) { bDelta = d; afternoonBreakAfterSlot = s; }
+      }
+    }
     const canAllMeetSimultaneously = numGroups <= vendors;
-    const totalMeetingTime = properSlots * meetingDuration + (properSlots - 1) * transitionTime + lunchDuration;
+    const totalMeetingTime = properSlots * meetingDuration + (properSlots - 1) * transitionTime + lunchDuration + morningBreak + afternoonBreak;
     const actualEndMin = dayStartMin + totalMeetingTime;
     const actualEndH = Math.floor(actualEndMin / 60);
     const actualEndM = actualEndMin % 60;
@@ -150,8 +199,8 @@ function App() {
     const halfDayEndH = Math.floor(halfDayEndMin / 60);
     const halfDayEndM = halfDayEndMin % 60;
     const spareSlots = totalSlots - vendorsToVisit;
-    return { totalMinutes, meetableMinutes, slotsPerDay: properSlots, halfDaySlots, totalSlots, totalDaysLabel, numGroups, actualGroupSize: Math.round(actualGroupSize * 10) / 10, vendorsToVisit, achievedCoverage: Math.round(achievedCoverage * 10) / 10, feasible, lunchAfterSlot, canAllMeetSimultaneously, actualEndH, actualEndM, halfDayEndH, halfDayEndM, spareSlots };
-  }, [vendors, delegates, groupSize, meetingDuration, transitionTime, startHour, startMin, endHour, endMin, lunchDuration, meetingDays, halfDay, targetCoverage]);
+    return { totalMinutes, meetableMinutes, slotsPerDay: properSlots, halfDaySlots, totalSlots, totalDaysLabel, numGroups, actualGroupSize: Math.round(actualGroupSize * 10) / 10, vendorsToVisit, achievedCoverage: Math.round(achievedCoverage * 10) / 10, feasible, lunchAfterSlot, morningBreakAfterSlot, afternoonBreakAfterSlot, canAllMeetSimultaneously, actualEndH, actualEndM, halfDayEndH, halfDayEndM, spareSlots };
+  }, [vendors, delegates, groupSize, meetingDuration, transitionTime, startHour, startMin, endHour, endMin, lunchDuration, meetingDays, halfDay, targetCoverage, morningBreak, afternoonBreak]);
 
   const formatEndTime = () => {
     const h = calc.actualEndH;
@@ -214,6 +263,8 @@ function App() {
               <Slider label="Meeting Duration" value={meetingDuration} onChange={setMeetingDuration} min={8} max={25} unit=" min" helpText="Time with each vendor" />
               <Slider label="Transition Time" value={transitionTime} onChange={setTransitionTime} min={3} max={10} unit=" min" helpText="Walking between suites" />
               <Slider label="Lunch Duration" value={lunchDuration} onChange={setLunchDuration} min={20} max={45} step={5} unit=" min" />
+              <Slider label="Morning Break" value={morningBreak} onChange={setMorningBreak} min={0} max={20} step={5} unit=" min" helpText={morningBreak === 0 ? "Off — set above 0 to add a break ~10:30 AM" : calc.morningBreakAfterSlot >= 0 ? `≈ 10:30 AM break, after slot ${calc.morningBreakAfterSlot}` : "No room before lunch for a morning break"} />
+              <Slider label="Afternoon Break" value={afternoonBreak} onChange={setAfternoonBreak} min={0} max={20} step={5} unit=" min" helpText={afternoonBreak === 0 ? "Off — set above 0 to add a break ~3:00 PM" : calc.afternoonBreakAfterSlot >= 0 ? `≈ 3:00 PM break, after slot ${calc.afternoonBreakAfterSlot}` : "No room after lunch for an afternoon break"} />
               <Slider label="Full Meeting Days" value={meetingDays} onChange={setMeetingDays} min={1} max={3} helpText="Days with full meeting windows" />
 
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
@@ -241,7 +292,7 @@ function App() {
                     <label style={{ fontSize: 11, color: COLORS.textDim }}>End</label>
                     <select value={`${endHour}:${endMin}`} onChange={(e) => { const [h, m] = e.target.value.split(":").map(Number); setEndHour(h); setEndMin(m); }}
                       style={{ width: "100%", padding: 8, background: COLORS.surfaceLight, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 14, fontFamily: "'JetBrains Mono', monospace" }}>
-                      {[12,13,14,15,16,17,18,19,20].map(h => [0,30].map(m => <option key={`${h}:${m}`} value={`${h}:${m}`}>{(h > 12 ? h - 12 : h)}:{m.toString().padStart(2,"0")} {h >= 12 ? "PM" : "AM"}</option>))}
+                      {[12,13,14,15,16,17,18,19,20].map(h => [0,5,10,15,20,25,30,35,40,45,50,55].map(m => <option key={`${h}:${m}`} value={`${h}:${m}`}>{(h > 12 ? h - 12 : h)}:{m.toString().padStart(2,"0")} {h >= 12 ? "PM" : "AM"}</option>))}
                     </select>
                   </div>
                 </div>
@@ -256,7 +307,7 @@ function App() {
                 <h3 style={{ margin: 0, fontSize: 13, color: COLORS.accent, textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'JetBrains Mono', monospace" }}>Full Day Schedule (per group)</h3>
                 <Badge color={COLORS.blue}>{calc.slotsPerDay} slots</Badge>
               </div>
-              <TimeSlotGrid slots={calc.slotsPerDay} lunchAfterSlot={calc.lunchAfterSlot} startHour={startHour} startMin={startMin} meetingDuration={meetingDuration} transitionDuration={transitionTime} />
+              <TimeSlotGrid slots={calc.slotsPerDay} lunchAfterSlot={calc.lunchAfterSlot} lunchDuration={lunchDuration} morningBreakAfterSlot={calc.morningBreakAfterSlot} morningBreakDuration={morningBreak} afternoonBreakAfterSlot={calc.afternoonBreakAfterSlot} afternoonBreakDuration={afternoonBreak} startHour={startHour} startMin={startMin} meetingDuration={meetingDuration} transitionDuration={transitionTime} />
 
               {halfDay && calc.halfDaySlots > 0 && (
                 <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px dashed ${COLORS.border}` }}>
@@ -264,7 +315,7 @@ function App() {
                     <h3 style={{ margin: 0, fontSize: 13, color: COLORS.warning, textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'JetBrains Mono', monospace" }}>Half Day (Last Day — no lunch)</h3>
                     <Badge color={COLORS.warning}>{calc.halfDaySlots} slots</Badge>
                   </div>
-                  <TimeSlotGrid slots={calc.halfDaySlots} lunchAfterSlot={-1} startHour={startHour} startMin={startMin} meetingDuration={meetingDuration} transitionDuration={transitionTime} />
+                  <TimeSlotGrid slots={calc.halfDaySlots} lunchAfterSlot={-1} lunchDuration={lunchDuration} morningBreakAfterSlot={calc.morningBreakAfterSlot} morningBreakDuration={morningBreak} afternoonBreakAfterSlot={-1} afternoonBreakDuration={0} startHour={startHour} startMin={startMin} meetingDuration={meetingDuration} transitionDuration={transitionTime} />
                   <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 6, fontStyle: "italic" }}>Ends at {fmtHalfEnd()} — lunch/closing follows</div>
                 </div>
               )}
