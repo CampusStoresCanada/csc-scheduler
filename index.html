@@ -158,33 +158,42 @@ function App() {
     const feasible = totalSlots >= vendorsToVisit;
     const noonMin = 12 * 60;
     const dayStartMin = startHour * 60 + startMin;
-    // Find best lunch slot (closest to noon)
+    // Step 1: estimate morning break position (unconstrained — just find where 10:30 AM falls)
+    let estMorningBreakSlot = -1;
+    if (morningBreak > 0) {
+      const morningTarget = 10 * 60 + 30;
+      let bDelta = Infinity;
+      for (let s = 1; s < properSlots; s++) {
+        const d = Math.abs((dayStartMin + s * slotDuration) - morningTarget);
+        if (d < bDelta) { bDelta = d; estMorningBreakSlot = s; }
+      }
+    }
+    // Step 2: find lunch slot with actual wall-clock time, accounting for morning break offset
     let bestLunchSlot = 1;
     let bestDelta = Infinity;
     for (let s = 1; s < properSlots; s++) {
-      const lunchStartIfAfterSlot = dayStartMin + s * slotDuration;
-      const delta = Math.abs(lunchStartIfAfterSlot - noonMin);
+      const breakBefore = (estMorningBreakSlot >= 0 && estMorningBreakSlot < s) ? morningBreak : 0;
+      const lunchStart = dayStartMin + s * slotDuration + breakBefore;
+      const delta = Math.abs(lunchStart - noonMin);
       if (delta < bestDelta) { bestDelta = delta; bestLunchSlot = s; }
     }
     const lunchAfterSlot = bestLunchSlot;
-    // Find morning break slot (target 10:30 AM), must be before lunch
+    // Step 3: finalize morning break — must be before lunch
     let morningBreakAfterSlot = -1;
-    if (morningBreak > 0 && lunchAfterSlot > 1) {
-      let bDelta = Infinity;
-      const morningTarget = 10 * 60 + 30;
-      for (let s = 1; s < lunchAfterSlot; s++) {
-        const breakStart = dayStartMin + s * slotDuration;
-        const d = Math.abs(breakStart - morningTarget);
-        if (d < bDelta) { bDelta = d; morningBreakAfterSlot = s; }
+    if (morningBreak > 0) {
+      if (estMorningBreakSlot > 0 && estMorningBreakSlot < lunchAfterSlot) {
+        morningBreakAfterSlot = estMorningBreakSlot;
+      } else if (lunchAfterSlot > 1) {
+        morningBreakAfterSlot = lunchAfterSlot - 1;
       }
     }
-    // Find afternoon break slot (target 3:00 PM), must be after lunch
+    // Step 4: afternoon break — after lunch, target 3:00 PM, accounting for all prior breaks
     let afternoonBreakAfterSlot = -1;
     if (afternoonBreak > 0 && properSlots > lunchAfterSlot + 1) {
-      let bDelta = Infinity;
       const afternoonTarget = 15 * 60;
+      let bDelta = Infinity;
       for (let s = lunchAfterSlot + 1; s < properSlots; s++) {
-        const breakStart = dayStartMin + s * slotDuration + lunchDuration + morningBreak;
+        const breakStart = dayStartMin + s * slotDuration + lunchDuration + (morningBreakAfterSlot >= 0 ? morningBreak : 0);
         const d = Math.abs(breakStart - afternoonTarget);
         if (d < bDelta) { bDelta = d; afternoonBreakAfterSlot = s; }
       }
